@@ -48,3 +48,24 @@ body {
 .glow-purple {
   box-shadow: 0 0 20px rgba(139, 92, 246, 0.25);
 }
+
+/* Make PDF text layer selectable when highlight tool is active */
+.select-text .react-pdf__Page__textContent {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  pointer-events: auto !important;
+}
+
+.select-text .react-pdf__Page__textContent span {
+  cursor: text !important;
+}
+
+.select-none .react-pdf__Page__textContent {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* Selection highlight color */
+.select-text ::selection {
+  background: rgba(254, 240, 138, 0.6);
+}

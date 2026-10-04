@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -30,12 +30,6 @@ export default function PDFViewer({
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [drawing, setDrawing] = useState<{
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
@@ -43,21 +37,66 @@ export default function PDFViewer({
     setPageNumber(1);
   }
 
-  const getPercent = (e: React.MouseEvent) => {
-    if (!pageRef.current) return { x: 0, y: 0 };
-    const rect = pageRef.current.getBoundingClientRect();
-    return {
-      x: ((e.clientX - rect.left) / rect.width) * 100,
-      y: ((e.clientY - rect.top) / rect.height) * 100,
+  // Handle text selection → create highlight
+  useEffect(() => {
+    if (activeTool !== "highlight") return;
+
+    const handleMouseUp = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !pageRef.current) return;
+
+      const range = selection.getRangeAt(0);
+      const selectedText = selection.toString().trim();
+      if (!selectedText) return;
+
+      // Check selection is inside our page
+      if (!pageRef.current.contains(range.commonAncestorContainer)) return;
+
+      const pageRect = pageRef.current.getBoundingClientRect();
+      const rects = range.getClientRects();
+
+      // Create a highlight for each line rect in the selection
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (r.width < 2 || r.height < 2) continue;
+
+        const x = ((r.left - pageRect.left) / pageRect.width) * 100;
+        const y = ((r.top - pageRect.top) / pageRect.height) * 100;
+        const width = (r.width / pageRect.width) * 100;
+        const height = (r.height / pageRect.height) * 100;
+
+        onAddAnnotation({
+          id: `hl-${Date.now()}-${i}`,
+          type: "highlight",
+          page: pageNumber,
+          x,
+          y,
+          width,
+          height,
+          color: "#fef08a",
+        } as HighlightAnnotation);
+      }
+
+      selection.removeAllRanges();
     };
-  };
+
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => document.removeEventListener("mouseup", handleMouseUp);
+  }, [activeTool, pageNumber, onAddAnnotation]);
 
   const handlePageClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (activeTool !== "text" || !pageRef.current) return;
       if ((e.target as HTMLElement).closest("[data-annotation]")) return;
 
-      const { x, y } = getPercent(e);
+      // Don't interfere if user is selecting text
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+
+      const rect = pageRef.current.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+
       const id = `text-${Date.now()}`;
       onAddAnnotation({
         id,
@@ -74,55 +113,14 @@ export default function PDFViewer({
     [activeTool, pageNumber, onAddAnnotation]
   );
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (activeTool !== "highlight") return;
-    if ((e.target as HTMLElement).closest("[data-annotation]")) return;
-    e.preventDefault();
-    const { x, y } = getPercent(e);
-    setDrawing({ startX: x, startY: y, currentX: x, currentY: y });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!drawing || activeTool !== "highlight") return;
-    const { x, y } = getPercent(e);
-    setDrawing((d) => (d ? { ...d, currentX: x, currentY: y } : null));
-  };
-
-  const handleMouseUp = () => {
-    if (!drawing || activeTool !== "highlight") return;
-
-    const x = Math.min(drawing.startX, drawing.currentX);
-    const y = Math.min(drawing.startY, drawing.currentY);
-    const width = Math.abs(drawing.currentX - drawing.startX);
-    const height = Math.abs(drawing.currentY - drawing.startY);
-
-    // Ignore tiny drags
-    if (width > 1 && height > 0.5) {
-      onAddAnnotation({
-        id: `hl-${Date.now()}`,
-        type: "highlight",
-        page: pageNumber,
-        x,
-        y,
-        width,
-        height,
-        color: "#fef08a",
-      } as HighlightAnnotation);
-    }
-
-    setDrawing(null);
-  };
-
   const pageAnnotations = annotations.filter((a) => a.page === pageNumber);
 
-  const previewRect =
-    drawing &&
-    ({
-      left: Math.min(drawing.startX, drawing.currentX),
-      top: Math.min(drawing.startY, drawing.currentY),
-      width: Math.abs(drawing.currentX - drawing.startX),
-      height: Math.abs(drawing.currentY - drawing.startY),
-    });
+  const cursorClass =
+    activeTool === "text"
+      ? "cursor-crosshair"
+      : activeTool === "highlight"
+        ? "cursor-text"
+        : "";
 
   return (
     <div className="flex flex-col h-full">
@@ -158,7 +156,7 @@ export default function PDFViewer({
           )}
           {activeTool === "highlight" && (
             <span className="text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded">
-              Drag on PDF to highlight
+              Select text to highlight
             </span>
           )}
 
@@ -196,16 +194,10 @@ export default function PDFViewer({
         >
           <div
             ref={pageRef}
-            className={`relative shadow-2xl rounded-lg overflow-hidden select-none ${
-              activeTool === "text" || activeTool === "highlight"
-                ? "cursor-crosshair"
-                : ""
+            className={`relative shadow-2xl rounded-lg overflow-hidden ${cursorClass} ${
+              activeTool === "highlight" ? "select-text" : "select-none"
             }`}
             onClick={handlePageClick}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
           >
             <Page
               pageNumber={pageNumber}
@@ -214,19 +206,6 @@ export default function PDFViewer({
               renderAnnotationLayer={true}
             />
 
-            {/* Live highlight preview while dragging */}
-            {previewRect && (
-              <div
-                className="absolute bg-yellow-300/40 pointer-events-none border border-yellow-400/50"
-                style={{
-                  left: `${previewRect.left}%`,
-                  top: `${previewRect.top}%`,
-                  width: `${previewRect.width}%`,
-                  height: `${previewRect.height}%`,
-                }}
-              />
-            )}
-
             {/* Annotations Overlay */}
             {pageAnnotations.map((ann) => {
               if (ann.type === "highlight") {
@@ -234,7 +213,7 @@ export default function PDFViewer({
                   <div
                     key={ann.id}
                     data-annotation
-                    className="absolute group"
+                    className="absolute group pointer-events-auto"
                     style={{
                       left: `${ann.x}%`,
                       top: `${ann.y}%`,
@@ -242,6 +221,7 @@ export default function PDFViewer({
                       height: `${ann.height}%`,
                       backgroundColor: ann.color,
                       opacity: 0.45,
+                      mixBlendMode: "multiply",
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
@@ -255,7 +235,6 @@ export default function PDFViewer({
                 );
               }
 
-              // Text annotation
               return (
                 <div
                   key={ann.id}
