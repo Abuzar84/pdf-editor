@@ -5,15 +5,15 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import type { Tool, TextAnnotation } from "@/types";
+import type { Tool, Annotation, TextAnnotation, HighlightAnnotation } from "@/types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PDFViewerProps {
   file: File;
   activeTool: Tool;
-  annotations: TextAnnotation[];
-  onAddAnnotation: (annotation: TextAnnotation) => void;
+  annotations: Annotation[];
+  onAddAnnotation: (annotation: Annotation) => void;
   onUpdateAnnotation: (id: string, text: string) => void;
   onDeleteAnnotation: (id: string) => void;
 }
@@ -30,6 +30,12 @@ export default function PDFViewer({
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [drawing, setDrawing] = useState<{
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+  } | null>(null);
   const pageRef = useRef<HTMLDivElement>(null);
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
@@ -37,33 +43,86 @@ export default function PDFViewer({
     setPageNumber(1);
   }
 
+  const getPercent = (e: React.MouseEvent) => {
+    if (!pageRef.current) return { x: 0, y: 0 };
+    const rect = pageRef.current.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * 100,
+      y: ((e.clientY - rect.top) / rect.height) * 100,
+    };
+  };
+
   const handlePageClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (activeTool !== "text" || !pageRef.current) return;
-
-      // Don't add if clicking on an existing annotation
       if ((e.target as HTMLElement).closest("[data-annotation]")) return;
 
-      const rect = pageRef.current.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * 100;
-      const y = ((e.clientY - rect.top) / rect.height) * 100;
-
+      const { x, y } = getPercent(e);
       const id = `text-${Date.now()}`;
       onAddAnnotation({
         id,
+        type: "text",
         page: pageNumber,
         x,
         y,
         text: "",
         fontSize: 16,
         color: "#000000",
-      });
+      } as TextAnnotation);
       setEditingId(id);
     },
     [activeTool, pageNumber, onAddAnnotation]
   );
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (activeTool !== "highlight") return;
+    if ((e.target as HTMLElement).closest("[data-annotation]")) return;
+    e.preventDefault();
+    const { x, y } = getPercent(e);
+    setDrawing({ startX: x, startY: y, currentX: x, currentY: y });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!drawing || activeTool !== "highlight") return;
+    const { x, y } = getPercent(e);
+    setDrawing((d) => (d ? { ...d, currentX: x, currentY: y } : null));
+  };
+
+  const handleMouseUp = () => {
+    if (!drawing || activeTool !== "highlight") return;
+
+    const x = Math.min(drawing.startX, drawing.currentX);
+    const y = Math.min(drawing.startY, drawing.currentY);
+    const width = Math.abs(drawing.currentX - drawing.startX);
+    const height = Math.abs(drawing.currentY - drawing.startY);
+
+    // Ignore tiny drags
+    if (width > 1 && height > 0.5) {
+      onAddAnnotation({
+        id: `hl-${Date.now()}`,
+        type: "highlight",
+        page: pageNumber,
+        x,
+        y,
+        width,
+        height,
+        color: "#fef08a",
+      } as HighlightAnnotation);
+    }
+
+    setDrawing(null);
+  };
+
   const pageAnnotations = annotations.filter((a) => a.page === pageNumber);
+
+  const previewRect =
+    drawing &&
+    ({
+      left: Math.min(drawing.startX, drawing.currentX),
+      top: Math.min(drawing.startY, drawing.currentY),
+      width: Math.abs(drawing.currentX - drawing.startX),
+      height: Math.abs(drawing.currentY - drawing.startY),
+    });
 
   return (
     <div className="flex flex-col h-full">
@@ -95,6 +154,11 @@ export default function PDFViewer({
           {activeTool === "text" && (
             <span className="text-xs text-primary bg-primary/10 px-2 py-1 rounded">
               Click on PDF to add text
+            </span>
+          )}
+          {activeTool === "highlight" && (
+            <span className="text-xs text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded">
+              Drag on PDF to highlight
             </span>
           )}
 
@@ -132,10 +196,16 @@ export default function PDFViewer({
         >
           <div
             ref={pageRef}
-            className={`relative shadow-2xl rounded-lg overflow-hidden ${
-              activeTool === "text" ? "cursor-crosshair" : ""
+            className={`relative shadow-2xl rounded-lg overflow-hidden select-none ${
+              activeTool === "text" || activeTool === "highlight"
+                ? "cursor-crosshair"
+                : ""
             }`}
             onClick={handlePageClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
           >
             <Page
               pageNumber={pageNumber}
@@ -144,75 +214,112 @@ export default function PDFViewer({
               renderAnnotationLayer={true}
             />
 
-            {/* Text Annotations Overlay */}
-            {pageAnnotations.map((ann) => (
+            {/* Live highlight preview while dragging */}
+            {previewRect && (
               <div
-                key={ann.id}
-                data-annotation
-                className="absolute group"
+                className="absolute bg-yellow-300/40 pointer-events-none border border-yellow-400/50"
                 style={{
-                  left: `${ann.x}%`,
-                  top: `${ann.y}%`,
-                  transform: "translate(-50%, -50%)",
+                  left: `${previewRect.left}%`,
+                  top: `${previewRect.top}%`,
+                  width: `${previewRect.width}%`,
+                  height: `${previewRect.height}%`,
                 }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {editingId === ann.id ? (
-                  <input
-                    autoFocus
-                    type="text"
-                    value={ann.text}
-                    placeholder="Type here..."
-                    className="bg-white/95 text-black border-2 border-primary rounded px-2 py-1 outline-none min-w-[120px] shadow-lg"
-                    style={{ fontSize: ann.fontSize * scale }}
-                    onChange={(e) => onUpdateAnnotation(ann.id, e.target.value)}
-                    onBlur={() => {
-                      if (!ann.text.trim()) {
-                        onDeleteAnnotation(ann.id);
-                      }
-                      setEditingId(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        if (!ann.text.trim()) {
-                          onDeleteAnnotation(ann.id);
-                        }
-                        setEditingId(null);
-                      }
-                      if (e.key === "Escape") {
-                        onDeleteAnnotation(ann.id);
-                        setEditingId(null);
-                      }
-                    }}
-                  />
-                ) : (
-                  <div
-                    className="cursor-pointer px-1 rounded hover:bg-primary/20 transition-colors"
-                    style={{
-                      fontSize: ann.fontSize * scale,
-                      color: ann.color,
-                      fontWeight: 500,
-                      textShadow: "0 0 2px rgba(255,255,255,0.8)",
-                    }}
-                    onDoubleClick={() => setEditingId(ann.id)}
-                  >
-                    {ann.text || (
-                      <span className="text-muted italic text-sm">Empty</span>
-                    )}
-                  </div>
-                )}
+              />
+            )}
 
-                {/* Delete button on hover */}
-                {editingId !== ann.id && (
-                  <button
-                    className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                    onClick={() => onDeleteAnnotation(ann.id)}
+            {/* Annotations Overlay */}
+            {pageAnnotations.map((ann) => {
+              if (ann.type === "highlight") {
+                return (
+                  <div
+                    key={ann.id}
+                    data-annotation
+                    className="absolute group"
+                    style={{
+                      left: `${ann.x}%`,
+                      top: `${ann.y}%`,
+                      width: `${ann.width}%`,
+                      height: `${ann.height}%`,
+                      backgroundColor: ann.color,
+                      opacity: 0.45,
+                    }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
+                    <button
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                      onClick={() => onDeleteAnnotation(ann.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              }
+
+              // Text annotation
+              return (
+                <div
+                  key={ann.id}
+                  data-annotation
+                  className="absolute group"
+                  style={{
+                    left: `${ann.x}%`,
+                    top: `${ann.y}%`,
+                    transform: "translate(-50%, -50%)",
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {editingId === ann.id ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={ann.text}
+                      placeholder="Type here..."
+                      className="bg-white/95 text-black border-2 border-primary rounded px-2 py-1 outline-none min-w-[120px] shadow-lg"
+                      style={{ fontSize: ann.fontSize * scale }}
+                      onChange={(e) => onUpdateAnnotation(ann.id, e.target.value)}
+                      onBlur={() => {
+                        if (!ann.text.trim()) onDeleteAnnotation(ann.id);
+                        setEditingId(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          if (!ann.text.trim()) onDeleteAnnotation(ann.id);
+                          setEditingId(null);
+                        }
+                        if (e.key === "Escape") {
+                          onDeleteAnnotation(ann.id);
+                          setEditingId(null);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="cursor-pointer px-1 rounded hover:bg-primary/20 transition-colors"
+                      style={{
+                        fontSize: ann.fontSize * scale,
+                        color: ann.color,
+                        fontWeight: 500,
+                        textShadow: "0 0 2px rgba(255,255,255,0.8)",
+                      }}
+                      onDoubleClick={() => setEditingId(ann.id)}
+                    >
+                      {ann.text || (
+                        <span className="text-muted italic text-sm">Empty</span>
+                      )}
+                    </div>
+                  )}
+
+                  {editingId !== ann.id && (
+                    <button
+                      className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                      onClick={() => onDeleteAnnotation(ann.id)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Document>
       </div>

@@ -1,5 +1,5 @@
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import type { TextAnnotation } from "@/types";
+import type { Annotation } from "@/types";
 
 function hexToRgb(hex: string) {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -13,7 +13,7 @@ function hexToRgb(hex: string) {
 
 export async function downloadEditedPdf(
   file: File,
-  annotations: TextAnnotation[]
+  annotations: Annotation[]
 ): Promise<void> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer);
@@ -21,28 +21,46 @@ export async function downloadEditedPdf(
   const pages = pdfDoc.getPages();
 
   for (const ann of annotations) {
-    if (!ann.text.trim()) continue;
-
-    // page numbers in our app are 1-based
     const pageIndex = ann.page - 1;
     if (pageIndex < 0 || pageIndex >= pages.length) continue;
 
     const page = pages[pageIndex];
     const { width, height } = page.getSize();
 
-    // Convert % coordinates (top-left origin) → PDF points (bottom-left origin)
-    const x = (ann.x / 100) * width;
-    const y = height - (ann.y / 100) * height - ann.fontSize * 0.3;
+    if (ann.type === "text") {
+      if (!ann.text.trim()) continue;
 
-    const color = hexToRgb(ann.color || "#000000");
+      const x = (ann.x / 100) * width;
+      const y = height - (ann.y / 100) * height - ann.fontSize * 0.3;
+      const color = hexToRgb(ann.color || "#000000");
 
-    page.drawText(ann.text, {
-      x,
-      y,
-      size: ann.fontSize,
-      font,
-      color: rgb(color.r, color.g, color.b),
-    });
+      page.drawText(ann.text, {
+        x,
+        y,
+        size: ann.fontSize,
+        font,
+        color: rgb(color.r, color.g, color.b),
+      });
+    }
+
+    if (ann.type === "highlight") {
+      const x = (ann.x / 100) * width;
+      const w = (ann.width / 100) * width;
+      const h = (ann.height / 100) * height;
+      // PDF y is bottom-left; our y is top percentage
+      const y = height - (ann.y / 100) * height - h;
+      const color = hexToRgb(ann.color || "#fef08a");
+
+      page.drawRectangle({
+        x,
+        y,
+        width: w,
+        height: h,
+        color: rgb(color.r, color.g, color.b),
+        opacity: 0.4,
+        borderWidth: 0,
+      });
+    }
   }
 
   const pdfBytes = await pdfDoc.save();

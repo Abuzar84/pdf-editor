@@ -15,13 +15,13 @@ import {
 } from "lucide-react";
 import PDFViewer from "@/components/PDFViewer";
 import { downloadEditedPdf } from "@/lib/pdf-utils";
-import type { Tool, TextAnnotation } from "@/types";
+import type { Tool, Annotation } from "@/types";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [activeTool, setActiveTool] = useState<Tool>("select");
-  const [annotations, setAnnotations] = useState<TextAnnotation[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleFile = useCallback((selectedFile: File) => {
@@ -63,13 +63,15 @@ export default function Home() {
     setActiveTool("select");
   };
 
-  const addAnnotation = (annotation: TextAnnotation) => {
+  const addAnnotation = (annotation: Annotation) => {
     setAnnotations((prev) => [...prev, annotation]);
   };
 
   const updateAnnotation = (id: string, text: string) => {
     setAnnotations((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, text } : a))
+      prev.map((a) =>
+        a.id === id && a.type === "text" ? { ...a, text } : a
+      )
     );
   };
 
