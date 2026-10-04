@@ -11,8 +11,10 @@ import {
   PenTool,
   X,
   MousePointer2,
+  Loader2,
 } from "lucide-react";
 import PDFViewer from "@/components/PDFViewer";
+import { downloadEditedPdf } from "@/lib/pdf-utils";
 import type { Tool, TextAnnotation } from "@/types";
 
 export default function Home() {
@@ -20,6 +22,7 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [annotations, setAnnotations] = useState<TextAnnotation[]>([]);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const handleFile = useCallback((selectedFile: File) => {
     if (selectedFile.type === "application/pdf") {
@@ -74,6 +77,19 @@ export default function Home() {
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
+  const handleDownload = async () => {
+    if (!file) return;
+    setIsDownloading(true);
+    try {
+      await downloadEditedPdf(file, annotations);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to download PDF. Please try again.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
@@ -90,7 +106,8 @@ export default function Home() {
             {file && (
               <>
                 <span className="text-xs text-muted hidden sm:inline">
-                  {annotations.length} annotation{annotations.length !== 1 ? "s" : ""}
+                  {annotations.length} annotation
+                  {annotations.length !== 1 ? "s" : ""}
                 </span>
                 <button
                   onClick={clearFile}
@@ -99,9 +116,17 @@ export default function Home() {
                   <X size={16} />
                   Close
                 </button>
-                <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-sm font-medium transition-all glow-purple">
-                  <Download size={16} />
-                  Download
+                <button
+                  onClick={handleDownload}
+                  disabled={isDownloading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-sm font-medium transition-all glow-purple disabled:opacity-60"
+                >
+                  {isDownloading ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
+                  {isDownloading ? "Preparing..." : "Download"}
                 </button>
               </>
             )}
