@@ -4,8 +4,8 @@ export interface TextAnnotation {
   id: string;
   type: "text";
   page: number;
-  x: number; // percentage of page width (0-100)
-  y: number; // percentage of page height (0-100)
+  x: number;
+  y: number;
   text: string;
   fontSize: number;
   color: string;
@@ -15,11 +15,20 @@ export interface HighlightAnnotation {
   id: string;
   type: "highlight";
   page: number;
-  x: number; // percentage (left)
-  y: number; // percentage (top)
-  width: number; // percentage
-  height: number; // percentage
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   color: string;
 }
 
-export type Annotation = TextAnnotation | HighlightAnnotation;
+export interface DrawAnnotation {
+  id: string;
+  type: "draw";
+  page: number;
+  points: { x: number; y: number }[]; // percentages 0-100
+  color: string;
+  strokeWidth: number;
+}
+
+export type Annotation = TextAnnotation | HighlightAnnotation | DrawAnnotation;

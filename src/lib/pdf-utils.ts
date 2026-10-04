@@ -29,11 +29,9 @@ export async function downloadEditedPdf(
 
     if (ann.type === "text") {
       if (!ann.text.trim()) continue;
-
       const x = (ann.x / 100) * width;
       const y = height - (ann.y / 100) * height - ann.fontSize * 0.3;
       const color = hexToRgb(ann.color || "#000000");
-
       page.drawText(ann.text, {
         x,
         y,
@@ -47,10 +45,8 @@ export async function downloadEditedPdf(
       const x = (ann.x / 100) * width;
       const w = (ann.width / 100) * width;
       const h = (ann.height / 100) * height;
-      // PDF y is bottom-left; our y is top percentage
       const y = height - (ann.y / 100) * height - h;
       const color = hexToRgb(ann.color || "#fef08a");
-
       page.drawRectangle({
         x,
         y,
@@ -60,6 +56,27 @@ export async function downloadEditedPdf(
         opacity: 0.4,
         borderWidth: 0,
       });
+    }
+
+    if (ann.type === "draw" && ann.points.length >= 2) {
+      const color = hexToRgb(ann.color || "#ef4444");
+      for (let i = 0; i < ann.points.length - 1; i++) {
+        const p1 = ann.points[i];
+        const p2 = ann.points[i + 1];
+        page.drawLine({
+          start: {
+            x: (p1.x / 100) * width,
+            y: height - (p1.y / 100) * height,
+          },
+          end: {
+            x: (p2.x / 100) * width,
+            y: height - (p2.y / 100) * height,
+          },
+          thickness: ann.strokeWidth || 2,
+          color: rgb(color.r, color.g, color.b),
+          lineCap: 1,
+        });
+      }
     }
   }
 
