@@ -13,14 +13,18 @@ function hexToRgb(hex: string) {
 
 export async function downloadEditedPdf(
   file: File,
-  annotations: Annotation[]
+  annotations: Annotation[],
+  deletedPages: number[] = []
 ): Promise<void> {
   const arrayBuffer = await file.arrayBuffer();
   const pdfDoc = await PDFDocument.load(arrayBuffer);
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
 
+  // Apply annotations only on non-deleted pages
   for (const ann of annotations) {
+    if (deletedPages.includes(ann.page)) continue;
+
     const pageIndex = ann.page - 1;
     if (pageIndex < 0 || pageIndex >= pages.length) continue;
 
@@ -78,6 +82,19 @@ export async function downloadEditedPdf(
         });
       }
     }
+  }
+
+  // Remove deleted pages (highest index first so indices stay valid)
+  const sorted = [...deletedPages].sort((a, b) => b - a);
+  for (const pageNum of sorted) {
+    const idx = pageNum - 1;
+    if (idx >= 0 && idx < pdfDoc.getPageCount()) {
+      pdfDoc.removePage(idx);
+    }
+  }
+
+  if (pdfDoc.getPageCount() === 0) {
+    throw new Error("Cannot download: all pages were deleted.");
   }
 
   const pdfBytes = await pdfDoc.save();

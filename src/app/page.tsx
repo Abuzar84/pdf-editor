@@ -22,12 +22,14 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [deletedPages, setDeletedPages] = useState<number[]>([]);
   const [isDownloading, setIsDownloading] = useState(false);
 
   const handleFile = useCallback((selectedFile: File) => {
     if (selectedFile.type === "application/pdf") {
       setFile(selectedFile);
       setAnnotations([]);
+      setDeletedPages([]);
       setActiveTool("select");
     } else {
       alert("Please upload a PDF file only.");
@@ -60,6 +62,7 @@ export default function Home() {
   const clearFile = () => {
     setFile(null);
     setAnnotations([]);
+    setDeletedPages([]);
     setActiveTool("select");
   };
 
@@ -79,14 +82,30 @@ export default function Home() {
     setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
+  const handleDeletePage = (page: number) => {
+    setDeletedPages((prev) =>
+      prev.includes(page) ? prev : [...prev, page]
+    );
+    // Also remove annotations on that page
+    setAnnotations((prev) => prev.filter((a) => a.page !== page));
+  };
+
+  const handleRestorePage = (page: number) => {
+    setDeletedPages((prev) => prev.filter((p) => p !== page));
+  };
+
   const handleDownload = async () => {
     if (!file) return;
     setIsDownloading(true);
     try {
-      await downloadEditedPdf(file, annotations);
+      await downloadEditedPdf(file, annotations, deletedPages);
     } catch (err) {
       console.error(err);
-      alert("Failed to download PDF. Please try again.");
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Failed to download PDF. Please try again."
+      );
     } finally {
       setIsDownloading(false);
     }
@@ -94,7 +113,6 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
       <header className="border-b border-white/5 bg-surface/50 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -110,6 +128,8 @@ export default function Home() {
                 <span className="text-xs text-muted hidden sm:inline">
                   {annotations.length} annotation
                   {annotations.length !== 1 ? "s" : ""}
+                  {deletedPages.length > 0 &&
+                    ` · ${deletedPages.length} page${deletedPages.length !== 1 ? "s" : ""} deleted`}
                 </span>
                 <button
                   onClick={clearFile}
@@ -136,9 +156,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 flex overflow-hidden">
-        {/* Sidebar - Tools */}
         <aside className="w-16 md:w-56 border-r border-white/5 bg-surface/30 p-3 flex flex-col gap-2 shrink-0">
           <p className="text-xs text-muted uppercase tracking-wider px-2 mb-2 hidden md:block">
             Tools
@@ -180,7 +198,6 @@ export default function Home() {
           />
         </aside>
 
-        {/* Editor Area */}
         <div className="flex-1 overflow-hidden">
           {!file ? (
             <div className="h-full flex items-center justify-center p-6">
@@ -222,9 +239,12 @@ export default function Home() {
               file={file}
               activeTool={activeTool}
               annotations={annotations}
+              deletedPages={deletedPages}
               onAddAnnotation={addAnnotation}
               onUpdateAnnotation={updateAnnotation}
               onDeleteAnnotation={deleteAnnotation}
+              onDeletePage={handleDeletePage}
+              onRestorePage={handleRestorePage}
             />
           )}
         </div>
