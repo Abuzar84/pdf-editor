@@ -10,16 +10,22 @@ import {
   Highlighter,
   PenTool,
   X,
+  MousePointer2,
 } from "lucide-react";
 import PDFViewer from "@/components/PDFViewer";
+import type { Tool, TextAnnotation } from "@/types";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [activeTool, setActiveTool] = useState<Tool>("select");
+  const [annotations, setAnnotations] = useState<TextAnnotation[]>([]);
 
   const handleFile = useCallback((selectedFile: File) => {
     if (selectedFile.type === "application/pdf") {
       setFile(selectedFile);
+      setAnnotations([]);
+      setActiveTool("select");
     } else {
       alert("Please upload a PDF file only.");
     }
@@ -50,6 +56,22 @@ export default function Home() {
 
   const clearFile = () => {
     setFile(null);
+    setAnnotations([]);
+    setActiveTool("select");
+  };
+
+  const addAnnotation = (annotation: TextAnnotation) => {
+    setAnnotations((prev) => [...prev, annotation]);
+  };
+
+  const updateAnnotation = (id: string, text: string) => {
+    setAnnotations((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, text } : a))
+    );
+  };
+
+  const deleteAnnotation = (id: string) => {
+    setAnnotations((prev) => prev.filter((a) => a.id !== id));
   };
 
   return (
@@ -67,6 +89,9 @@ export default function Home() {
           <div className="flex items-center gap-3">
             {file && (
               <>
+                <span className="text-xs text-muted hidden sm:inline">
+                  {annotations.length} annotation{annotations.length !== 1 ? "s" : ""}
+                </span>
                 <button
                   onClick={clearFile}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg border border-white/10 hover:border-white/20 text-sm text-muted hover:text-white transition-all"
@@ -92,10 +117,40 @@ export default function Home() {
             Tools
           </p>
 
-          <ToolButton icon={<Type size={18} />} label="Add Text" active={false} />
-          <ToolButton icon={<Highlighter size={18} />} label="Highlight" active={false} />
-          <ToolButton icon={<PenTool size={18} />} label="Draw" active={false} />
-          <ToolButton icon={<Trash2 size={18} />} label="Delete Page" active={false} />
+          <ToolButton
+            icon={<MousePointer2 size={18} />}
+            label="Select"
+            active={activeTool === "select"}
+            onClick={() => setActiveTool("select")}
+          />
+          <ToolButton
+            icon={<Type size={18} />}
+            label="Add Text"
+            active={activeTool === "text"}
+            onClick={() => setActiveTool("text")}
+            disabled={!file}
+          />
+          <ToolButton
+            icon={<Highlighter size={18} />}
+            label="Highlight"
+            active={activeTool === "highlight"}
+            onClick={() => setActiveTool("highlight")}
+            disabled={!file}
+          />
+          <ToolButton
+            icon={<PenTool size={18} />}
+            label="Draw"
+            active={activeTool === "draw"}
+            onClick={() => setActiveTool("draw")}
+            disabled={!file}
+          />
+          <ToolButton
+            icon={<Trash2 size={18} />}
+            label="Delete Page"
+            active={activeTool === "delete"}
+            onClick={() => setActiveTool("delete")}
+            disabled={!file}
+          />
         </aside>
 
         {/* Editor Area */}
@@ -136,7 +191,14 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <PDFViewer file={file} />
+            <PDFViewer
+              file={file}
+              activeTool={activeTool}
+              annotations={annotations}
+              onAddAnnotation={addAnnotation}
+              onUpdateAnnotation={updateAnnotation}
+              onDeleteAnnotation={deleteAnnotation}
+            />
           )}
         </div>
       </main>
@@ -148,14 +210,20 @@ function ToolButton({
   icon,
   label,
   active,
+  onClick,
+  disabled = false,
 }: {
   icon: React.ReactNode;
   label: string;
   active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
         active
           ? "bg-primary/20 text-primary"
           : "text-muted hover:text-white hover:bg-white/5"
