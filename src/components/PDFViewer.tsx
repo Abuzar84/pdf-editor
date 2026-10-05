@@ -48,7 +48,16 @@ export default function PDFViewer({
   const [isDrawing, setIsDrawing] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
 
-  // Visible pages (not deleted)
+  // Reset state when file changes
+  useEffect(() => {
+    setNumPages(0);
+    setPageNumber(1);
+    setScale(1.0);
+    setEditingId(null);
+    setCurrentStroke([]);
+    setIsDrawing(false);
+  }, [file]);
+
   const visiblePages = useMemo(() => {
     if (!numPages) return [];
     return Array.from({ length: numPages }, (_, i) => i + 1).filter(
@@ -56,7 +65,6 @@ export default function PDFViewer({
     );
   }, [numPages, deletedPages]);
 
-  // Keep current page on a visible page
   useEffect(() => {
     if (visiblePages.length === 0) return;
     if (!visiblePages.includes(pageNumber)) {
@@ -64,8 +72,8 @@ export default function PDFViewer({
     }
   }, [visiblePages, pageNumber]);
 
-  function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
-    setNumPages(numPages);
+  function onDocumentLoadSuccess({ numPages: total }: { numPages: number }) {
+    setNumPages(total);
     setPageNumber(1);
   }
 
@@ -88,7 +96,6 @@ export default function PDFViewer({
     if (idx < visiblePages.length - 1) setPageNumber(visiblePages[idx + 1]);
   };
 
-  // Highlight via text selection
   useEffect(() => {
     if (activeTool !== "highlight") return;
 
@@ -184,8 +191,6 @@ export default function PDFViewer({
 
   const pageAnnotations = annotations.filter((a) => a.page === pageNumber);
   const isCurrentDeleted = deletedPages.includes(pageNumber);
-  const canDelete =
-    visiblePages.length > 1 || (visiblePages.length === 1 && isCurrentDeleted);
 
   const pointsToSvgPath = (points: { x: number; y: number }[]) => {
     if (points.length === 0) return "";
@@ -204,6 +209,7 @@ export default function PDFViewer({
           : "";
 
   const displayIndex = visiblePages.indexOf(pageNumber) + 1;
+  const allDeleted = numPages > 0 && visiblePages.length === 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -221,7 +227,9 @@ export default function PDFViewer({
           <span className="text-sm text-muted min-w-[100px] text-center">
             {visiblePages.length > 0
               ? `${displayIndex} / ${visiblePages.length}`
-              : "—"}
+              : numPages > 0
+                ? "—"
+                : "Loading..."}
             {deletedPages.length > 0 && (
               <span className="text-danger text-xs ml-1">
                 ({deletedPages.length} deleted)
@@ -256,7 +264,7 @@ export default function PDFViewer({
               Draw on the PDF
             </span>
           )}
-          {activeTool === "delete" && (
+          {activeTool === "delete" && numPages > 0 && (
             <button
               onClick={() => {
                 if (isCurrentDeleted) {
@@ -298,10 +306,15 @@ export default function PDFViewer({
         </div>
       </div>
 
-      {/* PDF Page */}
+      {/* PDF Page - ALWAYS mount Document so load can succeed */}
       <div className="flex-1 overflow-auto flex justify-center p-6 bg-background">
-        {visiblePages.length === 0 ? (
-          <div className="text-muted text-sm">All pages deleted. Restore some pages or upload a new PDF.</div>
+        {allDeleted ? (
+          <div className="text-muted text-sm text-center">
+            <p className="mb-2">All pages deleted.</p>
+            <p className="text-xs">
+              Switch to Delete Page tool and restore pages, or upload a new PDF.
+            </p>
+          </div>
         ) : (
           <Document
             file={file}
@@ -313,160 +326,162 @@ export default function PDFViewer({
               <div className="text-danger text-sm">Failed to load PDF.</div>
             }
           >
-            <div
-              ref={pageRef}
-              className={`relative shadow-2xl rounded-lg overflow-hidden ${cursorClass} ${
-                activeTool === "highlight" ? "select-text" : "select-none"
-              } ${isCurrentDeleted ? "opacity-40" : ""}`}
-              onClick={handlePageClick}
-              onMouseDown={handleDrawStart}
-              onMouseMove={handleDrawMove}
-              onMouseUp={handleDrawEnd}
-              onMouseLeave={handleDrawEnd}
-            >
-              <Page
-                pageNumber={pageNumber}
-                scale={scale}
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-              />
-
-              {isCurrentDeleted && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                  <span className="text-danger font-semibold text-lg bg-black/60 px-4 py-2 rounded-lg">
-                    Page marked for deletion
-                  </span>
-                </div>
-              )}
-
-              <svg
-                className="absolute inset-0 w-full h-full pointer-events-none"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
+            {numPages > 0 && (
+              <div
+                ref={pageRef}
+                className={`relative shadow-2xl rounded-lg overflow-hidden ${cursorClass} ${
+                  activeTool === "highlight" ? "select-text" : "select-none"
+                } ${isCurrentDeleted ? "opacity-40" : ""}`}
+                onClick={handlePageClick}
+                onMouseDown={handleDrawStart}
+                onMouseMove={handleDrawMove}
+                onMouseUp={handleDrawEnd}
+                onMouseLeave={handleDrawEnd}
               >
-                {pageAnnotations
-                  .filter((a): a is DrawAnnotation => a.type === "draw")
-                  .map((ann) => (
+                <Page
+                  pageNumber={pageNumber}
+                  scale={scale}
+                  renderTextLayer={true}
+                  renderAnnotationLayer={true}
+                />
+
+                {isCurrentDeleted && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                    <span className="text-danger font-semibold text-lg bg-black/60 px-4 py-2 rounded-lg">
+                      Page marked for deletion
+                    </span>
+                  </div>
+                )}
+
+                <svg
+                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                >
+                  {pageAnnotations
+                    .filter((a): a is DrawAnnotation => a.type === "draw")
+                    .map((ann) => (
+                      <path
+                        key={ann.id}
+                        d={pointsToSvgPath(ann.points)}
+                        fill="none"
+                        stroke={ann.color}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ strokeWidth: ann.strokeWidth }}
+                      />
+                    ))}
+
+                  {currentStroke.length >= 2 && (
                     <path
-                      key={ann.id}
-                      d={pointsToSvgPath(ann.points)}
+                      d={pointsToSvgPath(currentStroke)}
                       fill="none"
-                      stroke={ann.color}
+                      stroke="#ef4444"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      style={{ strokeWidth: ann.strokeWidth }}
+                      style={{ strokeWidth: 2.5 }}
                     />
-                  ))}
+                  )}
+                </svg>
 
-                {currentStroke.length >= 2 && (
-                  <path
-                    d={pointsToSvgPath(currentStroke)}
-                    fill="none"
-                    stroke="#ef4444"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ strokeWidth: 2.5 }}
-                  />
-                )}
-              </svg>
+                {pageAnnotations.map((ann) => {
+                  if (ann.type === "draw") return null;
 
-              {pageAnnotations.map((ann) => {
-                if (ann.type === "draw") return null;
+                  if (ann.type === "highlight") {
+                    return (
+                      <div
+                        key={ann.id}
+                        data-annotation
+                        className="absolute group pointer-events-auto"
+                        style={{
+                          left: `${ann.x}%`,
+                          top: `${ann.y}%`,
+                          width: `${ann.width}%`,
+                          height: `${ann.height}%`,
+                          backgroundColor: ann.color,
+                          opacity: 0.45,
+                          mixBlendMode: "multiply",
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
+                          onClick={() => onDeleteAnnotation(ann.id)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  }
 
-                if (ann.type === "highlight") {
                   return (
                     <div
                       key={ann.id}
                       data-annotation
-                      className="absolute group pointer-events-auto"
+                      className="absolute group"
                       style={{
                         left: `${ann.x}%`,
                         top: `${ann.y}%`,
-                        width: `${ann.width}%`,
-                        height: `${ann.height}%`,
-                        backgroundColor: ann.color,
-                        opacity: 0.45,
-                        mixBlendMode: "multiply",
+                        transform: "translate(-50%, -50%)",
                       }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <button
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10"
-                        onClick={() => onDeleteAnnotation(ann.id)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                }
-
-                return (
-                  <div
-                    key={ann.id}
-                    data-annotation
-                    className="absolute group"
-                    style={{
-                      left: `${ann.x}%`,
-                      top: `${ann.y}%`,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {editingId === ann.id ? (
-                      <input
-                        autoFocus
-                        type="text"
-                        value={ann.text}
-                        placeholder="Type here..."
-                        className="bg-white/95 text-black border-2 border-primary rounded px-2 py-1 outline-none min-w-[120px] shadow-lg"
-                        style={{ fontSize: ann.fontSize * scale }}
-                        onChange={(e) =>
-                          onUpdateAnnotation(ann.id, e.target.value)
-                        }
-                        onBlur={() => {
-                          if (!ann.text.trim()) onDeleteAnnotation(ann.id);
-                          setEditingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
+                      {editingId === ann.id ? (
+                        <input
+                          autoFocus
+                          type="text"
+                          value={ann.text}
+                          placeholder="Type here..."
+                          className="bg-white/95 text-black border-2 border-primary rounded px-2 py-1 outline-none min-w-[120px] shadow-lg"
+                          style={{ fontSize: ann.fontSize * scale }}
+                          onChange={(e) =>
+                            onUpdateAnnotation(ann.id, e.target.value)
+                          }
+                          onBlur={() => {
                             if (!ann.text.trim()) onDeleteAnnotation(ann.id);
                             setEditingId(null);
-                          }
-                          if (e.key === "Escape") {
-                            onDeleteAnnotation(ann.id);
-                            setEditingId(null);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <div
-                        className="cursor-pointer px-1 rounded hover:bg-primary/20 transition-colors"
-                        style={{
-                          fontSize: ann.fontSize * scale,
-                          color: ann.color,
-                          fontWeight: 500,
-                          textShadow: "0 0 2px rgba(255,255,255,0.8)",
-                        }}
-                        onDoubleClick={() => setEditingId(ann.id)}
-                      >
-                        {ann.text || (
-                          <span className="text-muted italic text-sm">Empty</span>
-                        )}
-                      </div>
-                    )}
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              if (!ann.text.trim()) onDeleteAnnotation(ann.id);
+                              setEditingId(null);
+                            }
+                            if (e.key === "Escape") {
+                              onDeleteAnnotation(ann.id);
+                              setEditingId(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div
+                          className="cursor-pointer px-1 rounded hover:bg-primary/20 transition-colors"
+                          style={{
+                            fontSize: ann.fontSize * scale,
+                            color: ann.color,
+                            fontWeight: 500,
+                            textShadow: "0 0 2px rgba(255,255,255,0.8)",
+                          }}
+                          onDoubleClick={() => setEditingId(ann.id)}
+                        >
+                          {ann.text || (
+                            <span className="text-muted italic text-sm">Empty</span>
+                          )}
+                        </div>
+                      )}
 
-                    {editingId !== ann.id && (
-                      <button
-                        className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
-                        onClick={() => onDeleteAnnotation(ann.id)}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      {editingId !== ann.id && (
+                        <button
+                          className="absolute -top-2 -right-2 w-5 h-5 bg-danger text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+                          onClick={() => onDeleteAnnotation(ann.id)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Document>
         )}
       </div>
